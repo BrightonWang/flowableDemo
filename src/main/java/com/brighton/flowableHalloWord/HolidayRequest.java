@@ -1,15 +1,22 @@
 package com.brighton.flowableHalloWord;
 
+import org.flowable.engine.HistoryService;
 import org.flowable.engine.ProcessEngine;
 import org.flowable.engine.ProcessEngineConfiguration;
+import org.flowable.engine.ProcessEngines;
 import org.flowable.engine.RepositoryService;
 import org.flowable.engine.RuntimeService;
+import org.flowable.engine.TaskService;
+import org.flowable.engine.history.HistoricActivityInstance;
 import org.flowable.engine.impl.cfg.StandaloneProcessEngineConfiguration;
 import org.flowable.engine.repository.Deployment;
 import org.flowable.engine.repository.ProcessDefinition;
 import org.flowable.engine.runtime.ProcessInstance;
+import org.flowable.task.api.Task;
 
 import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Scanner;
 
 /**
@@ -64,10 +71,10 @@ public class HolidayRequest {
         System.out.println(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>");
         // 执行流程定义
         RuntimeService runtimeService = processEngine.getRuntimeService();
-        // 添加表单数据
+        // 添加表单数据 作为流程变量
         HashMap<String, Object> variables = new HashMap<String, Object>();
         variables.put("employee", employee);
-        variables.put("nrOfHoliday", nrOfHoliday);
+        variables.put("nrOfHolidays", nrOfHoliday);
         variables.put("description", description);
         ProcessInstance processInstance = runtimeService.startProcessInstanceByKey("holidayRequest", variables);
         System.out.println(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>");
@@ -75,6 +82,51 @@ public class HolidayRequest {
         System.out.println("流程实例id: " + processInstance.getId());
         System.out.println("流程活动id: " + processInstance.getActivityId());
         System.out.println(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>");
+
+        //完成任务, 填写表单
+        TaskService taskService = processEngine.getTaskService();
+        List<Task> tasks = taskService.createTaskQuery().taskCandidateGroup("managers").list();
+        System.out.println("You have " + tasks.size() + " tasks: ");
+        for (int i = 0; i < tasks.size(); i++) {
+            System.out.println((i + 1) + ")" + tasks.get(i).getName());
+        }
+        System.out.println("Which task would you like to complete?");
+        int taskIndex = Integer.valueOf(scanner.nextLine());
+        Task task = tasks.get(taskIndex - 1);
+        Map<String, Object> processVariables = taskService.getVariables(task.getId());
+        System.out.println("这里拿表单里的流程数据");
+        System.out.println(processVariables.get("employee") + " wants " + processVariables.get("nrOfHolidays") + " of holidays. Do you approve this? N/Y");
+        boolean approved = scanner.nextLine().toLowerCase().equals("y");
+        variables = new HashMap<String, Object>();
+        // 放入"approved" 流程变量, 用来通过顺序流
+        variables.put("approved", approved);
+        // 完成第一个任务
+        taskService.complete(task.getId(), variables);
+        if (approved){
+            // 完成假期申请成功最后一个任务
+            Task singleResult = taskService.createTaskQuery().taskAssignee(processVariables.get("employee").toString()).singleResult();
+            System.out.println("倒数第二个任务完成, 这是最后一个任务啦, 哈哈");
+            System.out.println("任务实例id: " + singleResult.getId());
+            System.out.println("这个任务的操作人是: " + singleResult.getAssignee());
+            taskService.complete(singleResult.getId());
+        }
+
+        System.out.println(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>");
+        HistoryService historyService = processEngine.getHistoryService();
+        List<HistoricActivityInstance> activities = historyService.createHistoricActivityInstanceQuery()
+                .processInstanceId(processInstance.getId())
+                .finished()
+                .orderByHistoricActivityInstanceEndTime().asc()
+                .list();
+        for (HistoricActivityInstance activity : activities) {
+            System.out.println("id: " + activity.getId());
+            System.out.println("流程定义id: " + activity.getProcessDefinitionId());
+            System.out.println("流程实例id: " + activity.getProcessInstanceId());
+            System.out.println("任务id: " + activity.getTaskId());
+            System.out.println("活动id: " + activity.getActivityId() + " took " + activity.getDurationInMillis() + "milliseconds");
+            System.out.println(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>");
+        }
+
 
     }
 }
